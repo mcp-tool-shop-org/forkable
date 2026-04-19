@@ -10,3 +10,7 @@ coverage/
 *.tsbuildinfo
 forkable-state.db
 forkable-state.db-journal
+site/.astro/
+site/dist/
+site/node_modules/
+.polyglot-cache.json

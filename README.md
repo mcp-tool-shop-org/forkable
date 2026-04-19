@@ -1,10 +1,18 @@
-# forkable
+<p align="center">
+  <a href="README.ja.md">日本語</a> | <a href="README.zh.md">中文</a> | <a href="README.es.md">Español</a> | <a href="README.fr.md">Français</a> | <a href="README.hi.md">हिन्दी</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português (BR)</a>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mcp-tool-shop-org/brand/main/logos/forkable/readme.png" width="500" alt="forkable">
+</p>
+
+<p align="center">
+  <a href="https://github.com/mcp-tool-shop-org/forkable/actions/workflows/ci.yml"><img src="https://github.com/mcp-tool-shop-org/forkable/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://mcp-tool-shop-org.github.io/forkable/"><img src="https://img.shields.io/badge/Landing-Page-2563eb" alt="Landing Page"></a>
+</p>
 
 > Adoption control plane for GitHub repos. Not a fork wrapper — an end-to-end layer that assesses adoption-readiness, chooses the right duplication path, executes it as a tracked async operation, leaves the result runnable, and keeps it synced over time.
-
-[![npm](https://img.shields.io/npm/v/@mcptoolshop/forkable.svg)](https://www.npmjs.com/package/@mcptoolshop/forkable)
-[![CI](https://github.com/mcp-tool-shop-org/forkable/actions/workflows/ci.yml/badge.svg)](https://github.com/mcp-tool-shop-org/forkable/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## What forkable does
 
@@ -123,3 +131,9 @@ See [SHIP_GATE.md](SHIP_GATE.md) for the gate scorecard.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  Built by <a href="https://mcp-tool-shop.github.io/">MCP Tool Shop</a>
+</p>
