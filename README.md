@@ -53,7 +53,7 @@ npx @mcptoolshop/forkable fleet-health
 
 All commands accept `--json` for machine-readable output.
 
-## The eighteen tools
+## The nineteen tools
 
 ### Assessment
 - `forkable_assess` — adoption-readiness score, blockers, strengths
