@@ -292,10 +292,13 @@ export function seedHardCaseRepo(fx: FixtureRepo, name = "forkable"): void {
 export async function initGitRepo(fx: FixtureRepo): Promise<void> {
   const { execSync } = await import("node:child_process");
   execSync("git init -q -b main", { cwd: fx.root });
-  execSync('git config user.email "test@example.com"', { cwd: fx.root });
-  execSync('git config user.name "Test"', { cwd: fx.root });
+  // Disable autocrlf so Windows CI doesn't rewrite \n → \r\n in checkout
+  // (the rollback test compares file contents byte-for-byte).
+  execSync("git config core.autocrlf false", { cwd: fx.root });
+  execSync("git config user.email \"test@example.com\"", { cwd: fx.root });
+  execSync("git config user.name \"Test\"", { cwd: fx.root });
   execSync("git add -A", { cwd: fx.root });
-  execSync('git commit -q -m "initial" --allow-empty', { cwd: fx.root });
+  execSync("git commit -q -m \"initial\" --allow-empty", { cwd: fx.root });
 }
 
 /**

@@ -16,6 +16,7 @@ import type {
 } from "../../schemas/rename.js";
 import { runIdentityPass } from "./identity/index.js";
 import { runSymbolsPass } from "./symbols.js";
+import { runDeepTsPass } from "./deep-ts.js";
 import { runTextualPass } from "./textual.js";
 import { runPostPass } from "./post.js";
 import { buildVariantSet, type VariantSet } from "./variants.js";
@@ -30,6 +31,7 @@ export interface BuildPlanOptions {
   lockfileStrategy: "regenerate" | "skip";
   deepTs?: boolean | undefined;
   preserveComments: boolean;
+  preserveHistory?: boolean;
 }
 
 function variantsToSchemaRecord(v: VariantSet): Record<VariantKey, VariantEntry> {
@@ -55,6 +57,7 @@ function hashPlanInput(opts: BuildPlanOptions): string {
     lockfileStrategy: opts.lockfileStrategy,
     deepTs: opts.deepTs,
     preserveComments: opts.preserveComments,
+    preserveHistory: opts.preserveHistory ?? true,
   }));
   return h.digest("hex").slice(0, 16);
 }
@@ -119,12 +122,35 @@ export async function buildRenamePlan(opts: BuildPlanOptions): Promise<{ plan: R
         message: "ast-grep not available — symbols pass skipped. Identifier-safe rewrites are not performed.",
       });
     }
+    for (const w of r.warnings) warnings.push(w);
     allChanges.push(...r.changes);
     plan.layers.symbols = {
       files: r.filesChanged.size,
       byLanguage: r.byLanguage,
       changes: r.changes,
     };
+  }
+
+  // Pass C — deep-ts. Runs AFTER symbols, BEFORE textual. Auto-enabled when
+  // tsconfig.json + ts-morph resolve; explicit opt-out via deepTs: false.
+  // Can also be explicitly requested via layers including "deep-ts".
+  const deepTsRequested =
+    opts.layers.includes("deep-ts") || opts.deepTs !== false;
+  if (deepTsRequested) {
+    const r = await runDeepTsPass({
+      repoRoot: opts.repoRoot,
+      variants,
+      apply: false,
+      deepTs: opts.deepTs,
+    });
+    if (r.ran) {
+      allChanges.push(...r.changes);
+      plan.layers.deepTs = {
+        files: r.filesChanged.size,
+        changes: r.changes,
+      };
+    }
+    for (const w of r.warnings) warnings.push(w);
   }
 
   if (opts.layers.includes("textual")) {
@@ -134,8 +160,10 @@ export async function buildRenamePlan(opts: BuildPlanOptions): Promise<{ plan: R
       apply: false,
       files: walked,
       skipFiles: identityFiles,
+      preserveHistory: opts.preserveHistory,
     });
     allChanges.push(...r.changes);
+    for (const w of r.warnings) warnings.push(w);
     plan.layers.textual = {
       files: r.filesChanged.size,
       hotspots: r.hotspots,
@@ -165,6 +193,7 @@ export async function buildRenamePlan(opts: BuildPlanOptions): Promise<{ plan: R
   plan.totalFiles =
     (plan.layers.identity?.files ?? 0) +
     (plan.layers.symbols?.files ?? 0) +
+    (plan.layers.deepTs?.files ?? 0) +
     (plan.layers.textual?.files ?? 0);
 
   return { plan, changes: allChanges, warnings };

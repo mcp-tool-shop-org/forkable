@@ -12,7 +12,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 type NapiLang = unknown;
-import type { RenameChange } from "../../schemas/rename.js";
+import type { RenameChange, RenameWarning } from "../../schemas/rename.js";
 import type { VariantSet } from "./variants.js";
 import { escapeRegex } from "./variants.js";
 import type { WalkedFile } from "./walk.js";
@@ -29,27 +29,30 @@ async function getNapi(): Promise<typeof import("@ast-grep/napi") | undefined> {
   }
 }
 
-/** ast-grep language enum tokens we actually ship. */
+/**
+ * ast-grep language enum tokens we actually ship in v1.1.0.
+ *
+ * The default `@ast-grep/napi` build ships tree-sitter bindings only for
+ * JavaScript, TypeScript, Tsx, Html, and Css. The broader polyglot set
+ * documented in the Bug 3 report (Python/Rust/Go/Java/Ruby/Php/CSharp/C/Cpp/
+ * Swift/Kotlin/Scala/Lua) is bundled behind optional `@ast-grep/lang-*`
+ * packages that we have NOT yet added as runtime dependencies — forkable
+ * v1.1.0 narrows the claim to the native set and emits a
+ * `RENAME_LANG_UNAVAILABLE` warning when source files of an unsupported
+ * language are encountered. Wider polyglot coverage is v1.2.0 work.
+ *
+ * See design/rename.md §3 Pass B.
+ */
 const LANG_MAP: Record<string, string> = {
   TypeScript: "TypeScript",
   JavaScript: "JavaScript",
   Tsx: "Tsx",
-  Python: "Python",
-  Rust: "Rust",
-  Go: "Go",
-  Java: "Java",
-  Ruby: "Ruby",
-  Php: "Php",
-  CSharp: "CSharp",
-  C: "C",
-  Cpp: "Cpp",
-  Swift: "Swift",
-  Kotlin: "Kotlin",
-  Scala: "Scala",
-  Lua: "Lua",
   Html: "Html",
   Css: "Css",
 };
+
+/** TypeScript/Tsx-specific kinds where class/interface/type-alias names live. */
+const TYPE_IDENTIFIER_LANGS = new Set(["TypeScript", "Tsx"]);
 
 function resolveLang(
   mod: typeof import("@ast-grep/napi"),
@@ -81,6 +84,8 @@ export interface SymbolsPassResult {
   byLanguage: Record<string, number>;
   /** Whether ast-grep was available. */
   available: boolean;
+  /** Non-fatal warnings (unavailable language bindings, string-literal rewrites, etc.). */
+  warnings: RenameWarning[];
 }
 
 /** Build a longest-first alternation from variant `from` values. */
@@ -97,9 +102,12 @@ function buildAlternation(variants: VariantSet): { alt: string; map: Map<string,
 }
 
 /**
- * Run the symbols pass. If ast-grep is unavailable or a language isn't
- * resolvable, that language is quietly skipped; higher layers can surface a
- * warning via the plan's warnings list.
+ * Run the symbols pass. If ast-grep is unavailable, all languages are skipped
+ * and `available` is false — the plan layer emits `RENAME_SYMBOLS_UNAVAILABLE`.
+ * If ast-grep is loaded but a specific language binding is not in the default
+ * napi build (e.g. Python/Rust/Go in v1.1.0), that language is skipped and a
+ * `RENAME_LANG_UNAVAILABLE` warning is emitted so the user is never silently
+ * no-op'd on source files.
  */
 export async function runSymbolsPass(opts: SymbolsPassOptions): Promise<SymbolsPassResult> {
   const result: SymbolsPassResult = {
@@ -107,6 +115,7 @@ export async function runSymbolsPass(opts: SymbolsPassOptions): Promise<SymbolsP
     filesChanged: new Set(),
     byLanguage: {},
     available: false,
+    warnings: [],
   };
   const mod = await getNapi();
   if (!mod) return result;
@@ -115,9 +124,27 @@ export async function runSymbolsPass(opts: SymbolsPassOptions): Promise<SymbolsP
   const alternation = buildAlternation(opts.variants);
   if (!alternation) return result;
 
+  // Track languages we've already warned about so we don't spam one warning
+  // per file — one warning per unsupported language, with the file count.
+  const unavailableWarned = new Set<string>();
+
   for (const [langName, relPaths] of Object.entries(opts.byLanguage)) {
     const lang = resolveLang(mod, langName);
-    if (!lang) continue;
+    if (!lang) {
+      // Language not supported in the shipped napi bindings. Emit one
+      // aggregate warning per language listing the file count.
+      if (!unavailableWarned.has(langName)) {
+        unavailableWarned.add(langName);
+        result.warnings.push({
+          code: "RENAME_LANG_UNAVAILABLE",
+          message:
+            `Language '${langName}' is not available in the shipped ast-grep bindings ` +
+            `(${relPaths.length} file${relPaths.length === 1 ? "" : "s"} skipped). ` +
+            `Identifier-level rewrites are not performed for these files in v1.1.0.`,
+        });
+      }
+      continue;
+    }
 
     for (const rel of relPaths) {
       const abs = path.join(opts.repoRoot, rel);
@@ -138,40 +165,68 @@ export async function runSymbolsPass(opts: SymbolsPassOptions): Promise<SymbolsP
         continue;
       }
 
+      interface HitRange {
+        text: string;
+        line: number;
+        startOffset: number;
+        endOffset: number;
+      }
+
       const fileChanges: RenameChange[] = [];
-      // Collect matches: identifiers equal to any variant.
-      let identMatches: { text: string; line: number; startOffset: number; endOffset: number }[] = [];
-      try {
-        const rule = {
-          rule: {
-            kind: "identifier",
-            regex: `^(${alternation.alt})$`,
-          },
-        };
-        const matches = root.findAll(rule) as unknown as Array<{
-          text: () => string;
-          range: () => { start: { line: number; column: number; index?: number }; end: { line: number; column: number; index?: number } };
-        }>;
-        identMatches = matches.map((m) => {
-          const r = m.range();
-          const startOff = (r.start as { index?: number }).index ?? offsetFromLineCol(source, r.start.line, r.start.column);
-          const endOff = (r.end as { index?: number }).index ?? offsetFromLineCol(source, r.end.line, r.end.column);
-          return { text: m.text(), line: r.start.line + 1, startOffset: startOff, endOffset: endOff };
-        });
-      } catch {
-        identMatches = [];
+
+      /**
+       * Helper — run findAll for a given rule and normalize to HitRange[].
+       * Any per-kind failure swallows back to an empty list; the outer loop
+       * continues across other kinds.
+       */
+      const findKind = (rule: unknown): HitRange[] => {
+        try {
+          const matches = root.findAll(rule) as unknown as Array<{
+            text: () => string;
+            range: () => { start: { line: number; column: number; index?: number }; end: { line: number; column: number; index?: number } };
+          }>;
+          return matches.map((m) => {
+            const r = m.range();
+            const startOff = (r.start as { index?: number }).index ?? offsetFromLineCol(source, r.start.line, r.start.column);
+            const endOff = (r.end as { index?: number }).index ?? offsetFromLineCol(source, r.end.line, r.end.column);
+            return { text: m.text(), line: r.start.line + 1, startOffset: startOff, endOffset: endOff };
+          });
+        } catch {
+          return [];
+        }
+      };
+
+      /** Dedupe overlapping matches by offset range. */
+      const pushUnique = (target: HitRange[], hits: HitRange[]) => {
+        for (const h of hits) {
+          const dup = target.some(
+            (t) => t.startOffset === h.startOffset && t.endOffset === h.endOffset,
+          );
+          if (!dup) target.push(h);
+        }
+      };
+
+      // ---- Identifier-kind matches (functions, consts, imports, etc.) ----
+      const identMatches: HitRange[] = [];
+      pushUnique(
+        identMatches,
+        findKind({ rule: { kind: "identifier", regex: `^(${alternation.alt})$` } }),
+      );
+      // For TS/Tsx, class and interface names use kind: type_identifier.
+      // Without this, `class Forkable {}` and `interface Forkable {}` are missed
+      // entirely. See Bug 1 in tests-found-bugs.md.
+      if (TYPE_IDENTIFIER_LANGS.has(langName)) {
+        pushUnique(
+          identMatches,
+          findKind({ rule: { kind: "type_identifier", regex: `^(${alternation.alt})$` } }),
+        );
       }
 
-      if (identMatches.length === 0 && opts.preserveComments) {
-        continue;
-      }
-
-      // Collect comment-kind matches with word-boundary regex if not preserving.
-      let commentHits: { before: string; after: string; line: number; startOffset: number; endOffset: number }[] = [];
+      // ---- Comment-kind matches (skipped under preserveComments). ----
+      const commentHits: { before: string; after: string; line: number; startOffset: number; endOffset: number }[] = [];
       if (!opts.preserveComments) {
         try {
-          const commentRule = { rule: { kind: "comment" } };
-          const commentMatches = root.findAll(commentRule) as unknown as Array<{
+          const commentMatches = root.findAll({ rule: { kind: "comment" } }) as unknown as Array<{
             text: () => string;
             range: () => { start: { line: number; column: number; index?: number }; end: { line: number; column: number; index?: number } };
           }>;
@@ -187,18 +242,75 @@ export async function runSymbolsPass(opts: SymbolsPassOptions): Promise<SymbolsP
             }
           }
         } catch {
-          commentHits = [];
+          // silent — no comment-kind support in this language
         }
       }
 
-      if (identMatches.length === 0 && commentHits.length === 0) continue;
+      // ---- String-literal rewrites (Bug 2 / §9.3 default-on). ----
+      // We rewrite inside `string_fragment` (preferred; gives us the unquoted
+      // content) and fall back to `string` / `template_string` where the
+      // language grammar doesn't expose fragments. Each rewritten occurrence
+      // emits a STRING_LITERAL_REWRITTEN warning so the user can review.
+      interface StringHit { before: string; after: string; line: number; startOffset: number; endOffset: number }
+      const stringHits: StringHit[] = [];
+      const wordRe = new RegExp(`\\b(${alternation.alt})\\b`, "g");
 
-      // Convert identifier matches to edits.
+      const stringFragmentMatches = findKind({ rule: { kind: "string_fragment" } });
+      const seenFragmentOffsets = new Set<string>();
+      for (const m of stringFragmentMatches) {
+        const replaced = m.text.replace(wordRe, (match) => alternation.map.get(match) ?? match);
+        if (replaced !== m.text) {
+          stringHits.push({ before: m.text, after: replaced, line: m.line, startOffset: m.startOffset, endOffset: m.endOffset });
+          seenFragmentOffsets.add(`${m.startOffset}:${m.endOffset}`);
+        }
+      }
+      // Fallback for languages/grammars that don't expose string_fragment —
+      // operate on the string node itself, but only rewrite the interior to
+      // avoid clobbering the quote characters.
+      for (const kind of ["string", "template_string"]) {
+        const stringNodeMatches = findKind({ rule: { kind } });
+        for (const m of stringNodeMatches) {
+          // Skip if a fragment inside this string already covered the rewrite.
+          const hasFragmentInside = stringFragmentMatches.some(
+            (f) => f.startOffset >= m.startOffset && f.endOffset <= m.endOffset,
+          );
+          if (hasFragmentInside) continue;
+          if (seenFragmentOffsets.has(`${m.startOffset}:${m.endOffset}`)) continue;
+          // Heuristic: preserve first and last char (quote / backtick) and
+          // rewrite only the body.
+          if (m.text.length < 2) continue;
+          const first = m.text[0];
+          const last = m.text[m.text.length - 1];
+          const body = m.text.slice(1, -1);
+          const replacedBody = body.replace(wordRe, (match) => alternation.map.get(match) ?? match);
+          if (replacedBody !== body) {
+            stringHits.push({
+              before: m.text,
+              after: `${first}${replacedBody}${last}`,
+              line: m.line,
+              startOffset: m.startOffset,
+              endOffset: m.endOffset,
+            });
+          }
+        }
+      }
+
+      if (identMatches.length === 0 && commentHits.length === 0 && stringHits.length === 0) continue;
+
+      // ---- Build edits. Dedupe by offset range. ----
       const edits: { startOffset: number; endOffset: number; replacement: string }[] = [];
+      const seenEdit = new Set<string>();
+      const pushEdit = (startOffset: number, endOffset: number, replacement: string) => {
+        const key = `${startOffset}:${endOffset}`;
+        if (seenEdit.has(key)) return;
+        seenEdit.add(key);
+        edits.push({ startOffset, endOffset, replacement });
+      };
+
       for (const m of identMatches) {
         const to = alternation.map.get(m.text);
         if (!to) continue;
-        edits.push({ startOffset: m.startOffset, endOffset: m.endOffset, replacement: to });
+        pushEdit(m.startOffset, m.endOffset, to);
         fileChanges.push({
           file: rel,
           layer: "symbols",
@@ -209,7 +321,7 @@ export async function runSymbolsPass(opts: SymbolsPassOptions): Promise<SymbolsP
         });
       }
       for (const h of commentHits) {
-        edits.push({ startOffset: h.startOffset, endOffset: h.endOffset, replacement: h.after });
+        pushEdit(h.startOffset, h.endOffset, h.after);
         fileChanges.push({
           file: rel,
           layer: "symbols",
@@ -217,6 +329,22 @@ export async function runSymbolsPass(opts: SymbolsPassOptions): Promise<SymbolsP
           line: h.line,
           before: h.before,
           after: h.after,
+        });
+      }
+      for (const h of stringHits) {
+        pushEdit(h.startOffset, h.endOffset, h.after);
+        fileChanges.push({
+          file: rel,
+          layer: "symbols",
+          kind: `${langName}:string`,
+          line: h.line,
+          before: h.before,
+          after: h.after,
+        });
+        result.warnings.push({
+          code: "STRING_LITERAL_REWRITTEN",
+          message: `Rewrote string literal '${h.before}' → '${h.after}' at ${rel}:${h.line}. Review to confirm this is not an incidental mention.`,
+          file: rel,
         });
       }
 

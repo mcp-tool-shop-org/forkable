@@ -58,6 +58,7 @@ export const renamePlanTool: ToolDescriptor<RenamePlanInput, RenamePlanOutput> =
         lockfileStrategy: input.lockfileStrategy,
         deepTs: input.deepTs,
         preserveComments: input.preserveComments,
+        preserveHistory: input.preserveHistory,
       });
       plan.warnings = warnings;
       const { planPath, diffPath } = await writePlanArtifacts(repoRoot, plan, changes);

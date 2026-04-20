@@ -61,9 +61,13 @@ function now(): number { return Date.now(); }
 export async function takeSnapshot(root: string): Promise<SnapshotResult> {
   const id = `rename-${Math.floor(now() / 1000)}-${Math.random().toString(36).slice(2, 8)}`;
   const dir = path.join(root, ".forkable", "snapshots", id);
-  await fs.mkdir(dir, { recursive: true });
 
   if (await isGit(root)) {
+    // Capture the pre-rename HEAD SHA BEFORE we create any on-disk artifacts.
+    // We intentionally do NOT `mkdir` the snapshot dir yet: `git stash push
+    // --include-untracked` would otherwise sweep the just-created `.forkable/`
+    // tree into the stash (and on Windows with autocrlf, stash fires even for
+    // otherwise-clean trees). Hold the SHA in memory, stash, then materialize.
     const sha = await runCommand(root, "git", ["rev-parse", "HEAD"]);
     if (!sha.ok) {
       throw new ForkableError("RENAME_SNAPSHOT_FAILED", "could not read HEAD", {
@@ -71,19 +75,26 @@ export async function takeSnapshot(root: string): Promise<SnapshotResult> {
       });
     }
     const preHead = sha.stdout.trim();
-    await fs.writeFile(path.join(dir, "pre-head.txt"), preHead + "\n", "utf8");
 
-    // Stash with untracked (best-effort).
+    // Stash with untracked (best-effort). At this point `.forkable/snapshots/<id>/`
+    // does not exist yet, so it cannot be dragged into the stash.
     const stashName = `forkable-${id}`;
     const stash = await runCommand(root, "git", ["stash", "push", "--include-untracked", "-m", stashName]);
     let stashRef: string | undefined;
     if (stash.ok && !/No local changes to save/i.test(stash.stdout + stash.stderr)) {
       stashRef = stashName;
-      await fs.writeFile(path.join(dir, "stash-ref.txt"), stashName + "\n", "utf8");
       // Pop the stash so the working tree still reflects the uncommitted work
       // we're about to operate on — rollback will re-create state from HEAD
       // plus the stash ref. We keep the stash on the stash list for recovery.
       await runCommand(root, "git", ["stash", "apply", "--index"]);
+    }
+
+    // Now that the stash has been taken and re-applied, materialize the
+    // snapshot directory and write metadata.
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "pre-head.txt"), preHead + "\n", "utf8");
+    if (stashRef !== undefined) {
+      await fs.writeFile(path.join(dir, "stash-ref.txt"), stashRef + "\n", "utf8");
     }
 
     const result: SnapshotResult = { id, dir, mode: "git", preHead };
@@ -93,6 +104,7 @@ export async function takeSnapshot(root: string): Promise<SnapshotResult> {
 
   // Non-git: copy a tree under `tree/` — simpler than tar, portable, and
   // makes rollback trivial. Also works offline.
+  await fs.mkdir(dir, { recursive: true });
   const treeDir = path.join(dir, "tree");
   await fs.mkdir(treeDir, { recursive: true });
   await copyTree(root, treeDir);

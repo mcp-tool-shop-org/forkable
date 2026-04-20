@@ -6,6 +6,7 @@ import { buildLogger } from "../lib/logger.js";
 import { buildRenamePlan } from "../lib/rename/plan.js";
 import { runIdentityPass } from "../lib/rename/identity/index.js";
 import { runSymbolsPass } from "../lib/rename/symbols.js";
+import { runDeepTsPass } from "../lib/rename/deep-ts.js";
 import { runTextualPass } from "../lib/rename/textual.js";
 import { runPostPass } from "../lib/rename/post.js";
 import { gcSnapshots, takeSnapshot } from "../lib/rename/snapshot.js";
@@ -127,7 +128,36 @@ export const renameApplyTool: ToolDescriptor<RenameApplyInput, RenameApplyOutput
         if (!r.available) {
           warnings.push({ code: "RENAME_SYMBOLS_UNAVAILABLE", message: "ast-grep unavailable — symbols pass skipped." });
         }
+        for (const w of r.warnings) warnings.push(w);
         logger.info("per-layer-complete", { layer: "symbols", files: r.filesChanged.size });
+      }
+
+      // Pass C — deep-ts. Runs after symbols, before textual. Auto-enabled
+      // when tsconfig.json + ts-morph resolve; skipped otherwise. Failure
+      // never blocks the overall rename — degrades to a warning.
+      // Plan layer set may or may not list "deep-ts" — we also run when the
+      // plan's stored layers.deepTs was populated (plan-time auto-enable).
+      const planHasDeepTs = plan.layers.deepTs !== undefined;
+      const layersWantDeepTs = plan.selectedLayers.includes("deep-ts");
+      if (planHasDeepTs || layersWantDeepTs) {
+        logger.info("per-layer-start", { layer: "deep-ts" });
+        const r = await runDeepTsPass({
+          repoRoot,
+          variants,
+          apply: true,
+          logger,
+        });
+        if (r.ran) {
+          perLayer.deepTs = r.filesChanged.size;
+          layersApplied.push("deep-ts");
+        }
+        for (const w of r.warnings) warnings.push(w);
+        logger.info("per-layer-complete", {
+          layer: "deep-ts",
+          files: r.filesChanged.size,
+          ran: r.ran,
+          ...(r.skipReason ? { skipReason: r.skipReason } : {}),
+        });
       }
 
       if (plan.selectedLayers.includes("textual")) {
@@ -138,9 +168,11 @@ export const renameApplyTool: ToolDescriptor<RenameApplyInput, RenameApplyOutput
           apply: true,
           files: walked,
           skipFiles: identityFiles,
+          preserveHistory: true,
         });
         perLayer.textual = r.filesChanged.size;
         layersApplied.push("textual");
+        for (const w of r.warnings) warnings.push(w);
         logger.info("per-layer-complete", { layer: "textual", files: r.filesChanged.size });
       }
 
@@ -175,6 +207,7 @@ export const renameApplyTool: ToolDescriptor<RenameApplyInput, RenameApplyOutput
       const filesChanged =
         (perLayer.identity ?? 0) +
         (perLayer.symbols ?? 0) +
+        (perLayer.deepTs ?? 0) +
         (perLayer.textual ?? 0);
 
       const receipt: RenameReceipt = {
