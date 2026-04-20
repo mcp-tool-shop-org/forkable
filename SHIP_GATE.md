@@ -38,7 +38,7 @@ Tracked against [shipcheck](https://github.com/mcp-tool-shop-org/shipcheck) v1.0
 ## Gate E — Polish (full treatment)
 
 - [x] Logo / wordmark — `mcp-tool-shop-org/brand/logos/forkable/readme.png`, used in README header
-- [ ] Translations — pending user re-run of `polyglot-mcp/scripts/translate-all.mjs README.md` after logo header landed
+- [x] Translations — 7 languages (ja/zh/es/fr/hi/it/pt-BR) translated against English master via polyglot-mcp
 - [x] Landing page (Astro via `@mcptoolshop/site-theme`) — `https://mcp-tool-shop-org.github.io/forkable/`
 - [x] Starlight handbook (7 pages, emerald accent, pagefind search) — `.../handbook/`
 - [x] GitHub repo metadata — description, topics, homepage all set
@@ -53,6 +53,6 @@ Tracked against [shipcheck](https://github.com/mcp-tool-shop-org/shipcheck) v1.0
 - [x] New error codes documented in handbook troubleshooting (RENAME_* series, STRING_LITERAL_REWRITTEN, ENV_REQUIRES_REVIEW, SYNC_BRANCH_EXISTS, MAKE_FORKABLE_BRANCH_EXISTS).
 - [x] CHANGELOG.md v1.1.0 entry added.
 - [x] `design/rename.md` marked SHIPPED.
-- [ ] Translations — v1.1.0 prose adds a single H3 "What's new" section + a Rename table row; full re-translation is pending user re-run of `polyglot-mcp/scripts/translate-all.mjs README.md`. Count headings inside FORKABLE_COUNTS markers already updated per-language.
+- [x] Translations — 7 languages fully re-translated against v1.1.0 English master (2026-04-20) via polyglot-mcp.
 
-All hard gates A–D pass for v1.1.0. Phase E full-treatment polish complete except a fresh translation pass (one user-run command pending).
+All hard gates A–D pass for v1.1.0. Phase E full-treatment polish complete.
