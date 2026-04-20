@@ -1,4 +1,5 @@
 import type { SiteConfig } from '@mcptoolshop/site-theme';
+import counts from './data/counts.json';
 
 export const config: SiteConfig = {
   title: '@mcptoolshop/forkable',
@@ -10,7 +11,7 @@ export const config: SiteConfig = {
   footerText: 'MIT Licensed — built by <a href="https://mcp-tool-shop.github.io/" style="color:var(--color-muted);text-decoration:underline">MCP Tool Shop</a>',
 
   hero: {
-    badge: 'v1.0.0 · 19 tools · 162 tests',
+    badge: `v${counts.version} · ${counts.tools} tools · ${counts.tests} tests`,
     headline: 'Adoption control plane',
     headlineAccent: 'for GitHub repos.',
     description:

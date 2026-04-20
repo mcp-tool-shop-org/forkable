@@ -128,7 +128,10 @@ async function healthOne(
   const upstream = data.parent.full_name;
   const branch = data.default_branch;
   const upstreamDefaultBranch = data.parent.default_branch;
-  const [upOwner, upRepo] = upstream.split("/") as [string, string];
+  const { owner: upOwner, repo: upRepo } = parseRepoRef(upstream, {
+    field: `parent.full_name of ${ref}`,
+    hint: `GitHub returned a malformed parent full_name for fork ${ref}. This fork will be marked errored in the fleet report.`,
+  });
 
   // Base is upstream's default branch; head is the fork's branch. Using the
   // fork's branch name on both sides misreports divergence when the fork has

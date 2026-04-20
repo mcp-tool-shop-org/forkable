@@ -51,6 +51,35 @@ function asPaginate(arr: unknown[]) {
   };
 }
 
+/**
+ * Extract a stable string key from an Octokit endpoint passed to
+ * `octokit.paginate(endpoint, params)`. We prefer the endpoint's
+ * `.endpoint.DEFAULTS.url` because that's the stable, documented
+ * identifier (e.g. "/user/repos"). We fall back to the function's
+ * `.name` property so purely-synthetic test fakes still work.
+ *
+ * Reference-identity dispatch (the old approach, `endpoint === client.rest...`)
+ * was fragile because Octokit wraps methods with the @octokit/plugin-retry /
+ * @octokit/plugin-throttling plugins — once those are attached in production,
+ * the wrapped function is NOT reference-equal to `client.rest.repos.listForks`,
+ * so all paginate calls silently fell through to the `[]` branch.
+ */
+export function endpointKey(endpoint: unknown): string {
+  // Real Octokit endpoints (and our test fakes built with Object.assign) are
+  // FUNCTIONS that also expose a `.endpoint.DEFAULTS.url` property. Check
+  // the url regardless of whether endpoint is an object or a function.
+  if (endpoint && (typeof endpoint === "object" || typeof endpoint === "function")) {
+    const ep = (endpoint as { endpoint?: { DEFAULTS?: { url?: string } } }).endpoint;
+    const url = ep?.DEFAULTS?.url;
+    if (typeof url === "string" && url.length > 0) return url;
+  }
+  if (typeof endpoint === "function") {
+    const name = (endpoint as { name?: string }).name;
+    if (typeof name === "string" && name.length > 0) return name;
+  }
+  return "";
+}
+
 export function fleetFakeOctokit(cfg: FleetOctokitConfig = {}): Octokit {
   const my = cfg.myRepos ?? [];
   const sourceForks = cfg.sourceForks ?? {};
@@ -61,24 +90,39 @@ export function fleetFakeOctokit(cfg: FleetOctokitConfig = {}): Octokit {
   }
 
   const paginate = ((endpoint: unknown, params?: { owner?: string; repo?: string }) => {
-    if (endpoint === client.rest.repos.listForAuthenticatedUser) {
+    const key = endpointKey(endpoint);
+    // Match either the REST URL (real Octokit endpoints) or the function
+    // name (test fakes / wrapped plugin functions).
+    if (key === "/user/repos" || key === "listForAuthenticatedUser") {
       return asPaginate(my).iterator();
     }
-    if (endpoint === client.rest.repos.listForks) {
-      const key = params ? `${params.owner}/${params.repo}` : "";
-      return asPaginate(sourceForks[key] ?? []).iterator();
+    if (key === "/repos/{owner}/{repo}/forks" || key === "listForks") {
+      const k = params ? `${params.owner}/${params.repo}` : "";
+      return asPaginate(sourceForks[k] ?? []).iterator();
     }
     return asPaginate([]).iterator();
   }) as unknown as Octokit["paginate"];
   (paginate as unknown as { iterator: typeof paginate }).iterator = paginate;
 
+  // Tag the underlying endpoint functions with the shape real Octokit methods
+  // have so both the reference-identity path (pre-retry-plugin) AND the
+  // string-key path (post-retry-plugin) resolve correctly.
+  const listForAuthenticatedUserFn = Object.assign(
+    () => Promise.resolve({ data: my }),
+    { endpoint: { DEFAULTS: { url: "/user/repos" } } },
+  ) as unknown as Octokit["rest"]["repos"]["listForAuthenticatedUser"];
+  const listForksFn = Object.assign(
+    ({ owner, repo }: { owner: string; repo: string }) =>
+      Promise.resolve({ data: sourceForks[`${owner}/${repo}`] ?? [] }),
+    { endpoint: { DEFAULTS: { url: "/repos/{owner}/{repo}/forks" } } },
+  ) as unknown as Octokit["rest"]["repos"]["listForks"];
+
   const client = {
     paginate,
     rest: {
       repos: {
-        listForAuthenticatedUser: (() => Promise.resolve({ data: my })) as unknown as Octokit["rest"]["repos"]["listForAuthenticatedUser"],
-        listForks: (({ owner, repo }: { owner: string; repo: string }) =>
-          Promise.resolve({ data: sourceForks[`${owner}/${repo}`] ?? [] })) as unknown as Octokit["rest"]["repos"]["listForks"],
+        listForAuthenticatedUser: listForAuthenticatedUserFn,
+        listForks: listForksFn,
         get: async ({ owner, repo }: { owner: string; repo: string }) => {
           const fullName = `${owner}/${repo}`;
           const r = lookup.get(fullName);

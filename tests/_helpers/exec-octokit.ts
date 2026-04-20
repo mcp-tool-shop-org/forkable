@@ -1,5 +1,16 @@
 import type { Octokit } from "@octokit/rest";
-import { RequestError } from "@octokit/request-error";
+import { fakeBuilder, makeRequestError } from "./octokit-fake.js";
+
+/**
+ * Test fake for tools that EXECUTE (createFork / createUsingTemplate) plus
+ * their pre-flight `repos.get` and `orgs.get` lookups.
+ *
+ * As of Stage C this is the proof-of-concept migration to the shared
+ * OctokitFakeBuilder in `octokit-fake.ts`. Same external API as before —
+ * tests import `execFakeOctokit(cfg)` — so no call sites changed.
+ * The other five hand-rolled fakes (sync, fleet, make-forkable, drift,
+ * bootstrap, snapshot) should move over in a dedicated follow-up pass.
+ */
 
 interface ExecOctokitConfig {
   /** Authenticated user login */
@@ -24,88 +35,71 @@ interface ExecOctokitConfig {
   calls?: { createFork: unknown[]; createTemplate: unknown[] };
 }
 
-function notFound(): RequestError {
-  return new RequestError("Not Found", 404, {
-    request: { method: "GET", url: "x", headers: {} },
-    response: { status: 404, url: "x", headers: {}, data: {} },
-  });
-}
-function forbidden(msg: string): RequestError {
-  return new RequestError(msg, 403, {
-    request: { method: "POST", url: "x", headers: {} },
-    response: { status: 403, url: "x", headers: {}, data: {} },
-  });
-}
-function validation(msg: string): RequestError {
-  return new RequestError(msg, 422, {
-    request: { method: "POST", url: "x", headers: {} },
-    response: { status: 422, url: "x", headers: {}, data: {} },
-  });
-}
-
-
 export function execFakeOctokit(cfg: ExecOctokitConfig = {}): Octokit {
   const existing = cfg.existingRepos ?? new Set<string>();
   const calls = cfg.calls;
-  return {
-    rest: {
-      users: {
-        getAuthenticated: async () => ({ data: { login: cfg.login ?? "tester" } }),
-      },
-      repos: {
-        get: async ({ owner, repo }: { owner: string; repo: string }) => {
-          const fullName = `${owner}/${repo}`;
-          // First, source repo lookup pattern (resolveForkPolicy)
-          if (cfg.sourceRepo && existing.size === 0) {
-            return {
-              data: {
-                visibility:
-                  cfg.sourceRepo.visibility ??
-                  (cfg.sourceRepo.private ? "private" : "public"),
-                private: cfg.sourceRepo.private ?? false,
-                archived: cfg.sourceRepo.archived ?? false,
-                allow_forking: cfg.sourceRepo.allow_forking ?? true,
-                owner: cfg.sourceRepo.owner ?? { type: "User", login: owner },
-                default_branch: "main",
-                full_name: fullName,
-                id: 12345,
-                html_url: `https://github.com/${fullName}`,
-              },
-            };
-          }
-          if (existing.has(fullName)) {
-            return {
-              data: {
-                id: 99,
-                full_name: fullName,
-                html_url: `https://github.com/${fullName}`,
-                default_branch: "main",
-                visibility: "public",
-                private: false,
-                archived: false,
-                allow_forking: true,
-                owner: { type: "User", login: owner },
-              },
-            };
-          }
-          throw notFound();
+
+  const b = fakeBuilder();
+
+  b.on("users.getAuthenticated", () => ({ data: { login: cfg.login ?? "tester" } }));
+
+  b.on("repos.get", (params: { owner: string; repo: string }) => {
+    const fullName = `${params.owner}/${params.repo}`;
+    // First, source repo lookup pattern (resolveForkPolicy)
+    if (cfg.sourceRepo && existing.size === 0) {
+      return {
+        data: {
+          visibility:
+            cfg.sourceRepo.visibility ??
+            (cfg.sourceRepo.private ? "private" : "public"),
+          private: cfg.sourceRepo.private ?? false,
+          archived: cfg.sourceRepo.archived ?? false,
+          allow_forking: cfg.sourceRepo.allow_forking ?? true,
+          owner: cfg.sourceRepo.owner ?? { type: "User", login: params.owner },
+          default_branch: "main",
+          full_name: fullName,
+          id: 12345,
+          html_url: `https://github.com/${fullName}`,
         },
-        createFork: async (params: unknown) => {
-          calls?.createFork.push(params);
-          if (cfg.createForkBehavior === "fail-403") throw forbidden("Forks not allowed");
-          return { status: 202 };
+      };
+    }
+    if (existing.has(fullName)) {
+      return {
+        data: {
+          id: 99,
+          full_name: fullName,
+          html_url: `https://github.com/${fullName}`,
+          default_branch: "main",
+          visibility: "public",
+          private: false,
+          archived: false,
+          allow_forking: true,
+          owner: { type: "User", login: params.owner },
         },
-        createUsingTemplate: async (params: unknown) => {
-          calls?.createTemplate.push(params);
-          if (cfg.createTemplateBehavior === "fail-422") throw validation("Owner not found");
-          return { status: 201 };
-        },
-      },
-      orgs: {
-        get: async () => ({
-          data: { members_can_fork_private_repositories: cfg.orgAllowsPrivateForks ?? true },
-        }),
-      },
-    },
-  } as unknown as Octokit;
+      };
+    }
+    throw makeRequestError(404, "Not Found");
+  });
+
+  b.on("repos.createFork", (params: unknown) => {
+    calls?.createFork.push(params);
+    if (cfg.createForkBehavior === "fail-403") {
+      throw makeRequestError(403, "Forks not allowed");
+    }
+    return { status: 202 };
+  });
+
+  b.on("repos.createUsingTemplate", (params: unknown) => {
+    calls?.createTemplate.push(params);
+    if (cfg.createTemplateBehavior === "fail-422") {
+      throw makeRequestError(422, "Owner not found");
+    }
+    return { status: 201 };
+  });
+
+  b.on("orgs.get", () => ({
+    data: { members_can_fork_private_repositories: cfg.orgAllowsPrivateForks ?? true },
+  }));
+
+  return b.build();
 }

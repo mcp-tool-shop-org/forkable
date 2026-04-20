@@ -48,7 +48,10 @@ export const proposeSyncPrTool: ToolDescriptor<ProposeSyncPrInput, ProposeSyncPr
       }
       const branch = input.branch ?? forkData.default_branch;
       const upstream = forkData.parent.full_name;
-      const [upstreamOwner, upstreamRepo] = upstream.split("/") as [string, string];
+      const { owner: upstreamOwner, repo: upstreamRepo } = parseRepoRef(upstream, {
+        field: `parent.full_name of ${owner}/${repo}`,
+        hint: `GitHub returned a malformed parent full_name for fork ${owner}/${repo}. Re-run diagnose_divergence to refresh, or file an issue with the parent value.`,
+      });
 
       const upstreamRef = await ctx.octokit.rest.git
         .getRef({

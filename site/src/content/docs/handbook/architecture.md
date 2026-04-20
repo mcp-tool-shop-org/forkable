@@ -149,7 +149,8 @@ GITHUB_NOT_FOUND       GITHUB_FORBIDDEN       GITHUB_UNAUTHORIZED
 GITHUB_RATE_LIMITED    GITHUB_CONFLICT        GITHUB_VALIDATION
 GITHUB_UNKNOWN         FORK_POLICY_BLOCKED    TEMPLATE_NOT_AVAILABLE
 OPERATION_NOT_FOUND    OPERATION_TIMEOUT      OPERATION_FAILED
-SYNC_CONFLICT          SYNC_DIVERGED          INTERNAL
+SYNC_CONFLICT          SYNC_DIVERGED          SYNC_BRANCH_EXISTS
+MAKE_FORKABLE_BRANCH_EXISTS                   INTERNAL
 NOT_IMPLEMENTED
 ```
 
@@ -167,3 +168,19 @@ These are enforced by code, not by docs:
 - Print or persist the `GITHUB_TOKEN` value
 
 See [Security](../security/) for the full threat model.
+
+## Docs conventions
+
+### Counts as data
+
+The small count-ish facts that show up in marketing copy — number of layers, number of tools, test count, current version — live in a single JSON file: [`site/src/data/counts.json`](https://github.com/mcp-tool-shop-org/forkable/blob/main/site/src/data/counts.json). The landing page and Starlight handbook read from there.
+
+READMEs (English master + seven translations) can't `import` JSON, so the lines that restate those counts are wrapped in HTML marker comments:
+
+```html
+<!-- FORKABLE_COUNTS_START -->
+## The nineteen tools
+<!-- FORKABLE_COUNTS_END -->
+```
+
+A future sync script will use those markers to keep prose in step with `counts.json`. Today the markers are just discovery aids: if you change a count, grep for the markers and update every file in one pass. Don't remove the markers — future automation depends on them.

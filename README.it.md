@@ -54,14 +54,16 @@ Aggiungi quanto segue alla configurazione del tuo client MCP:
 ```bash
 npx @mcptoolshop/forkable assess owner/repo
 npx @mcptoolshop/forkable choose-path owner/repo --goal contribute_upstream
-npx @mcptoolshop/forkable create-fork owner/repo --destination my-org
+npx @mcptoolshop/forkable create-fork owner/repo --destination-org my-org
 npx @mcptoolshop/forkable sync my-fork
 npx @mcptoolshop/forkable fleet-health
 ```
 
 Tutti i comandi accettano l'opzione `--json` per l'output leggibile dalle macchine.
 
+<!-- FORKABLE_COUNTS_START -->
 ## I diciannove strumenti
+<!-- FORKABLE_COUNTS_END -->
 
 ### Valutazione
 - `forkable_assess` — punteggio di prontezza all'adozione, blocchi, punti di forza

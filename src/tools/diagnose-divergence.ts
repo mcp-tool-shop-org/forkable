@@ -62,7 +62,10 @@ export const diagnoseDivergenceTool: ToolDescriptor<
       const branch = input.branch ?? forkData.default_branch;
       const upstream = forkData.parent.full_name;
       const upstreamDefaultBranch = forkData.parent.default_branch;
-      const [upstreamOwner, upstreamRepo] = upstream.split("/") as [string, string];
+      const { owner: upstreamOwner, repo: upstreamRepo } = parseRepoRef(upstream, {
+        field: `parent.full_name of ${owner}/${repo}`,
+        hint: `GitHub returned a malformed parent full_name for fork ${owner}/${repo}. Re-run the call or file an issue with the parent value.`,
+      });
 
       // Compare upstream's default branch (base) against the fork's branch (head).
       // Using the fork's branch name on both sides silently misreports divergence

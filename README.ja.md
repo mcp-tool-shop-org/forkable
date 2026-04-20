@@ -54,14 +54,16 @@ MCPクライアントの設定に追加します。
 ```bash
 npx @mcptoolshop/forkable assess owner/repo
 npx @mcptoolshop/forkable choose-path owner/repo --goal contribute_upstream
-npx @mcptoolshop/forkable create-fork owner/repo --destination my-org
+npx @mcptoolshop/forkable create-fork owner/repo --destination-org my-org
 npx @mcptoolshop/forkable sync my-fork
 npx @mcptoolshop/forkable fleet-health
 ```
 
 すべてのコマンドは、機械可読な出力のために`--json`オプションを受け入れます。
 
+<!-- FORKABLE_COUNTS_START -->
 ## 19のツール
+<!-- FORKABLE_COUNTS_END -->
 
 ### 評価
 - `forkable_assess`：導入の準備状況のスコア、問題点、利点

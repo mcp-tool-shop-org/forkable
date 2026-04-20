@@ -52,6 +52,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@octokit/plugin-retry": "^8.1.0",
+    "@octokit/plugin-throttling": "^11.0.3",
     "@octokit/request-error": "^6.1.0",
     "@octokit/rest": "^21.0.0",
     "better-sqlite3": "^11.3.0",

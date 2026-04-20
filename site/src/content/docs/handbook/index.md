@@ -7,7 +7,9 @@ sidebar:
 
 > Forking a GitHub repo is one click. Adopting it — picking fork vs template, dealing with org policy, waiting for async creation, wiring upstream sync, making the result actually runnable — is everything else. **Forkable owns the everything-else.**
 
+<!-- FORKABLE_COUNTS_START -->
 forkable is an MCP server **and** a CLI. The same nineteen tools are exposed through both surfaces, sharing one schema-validated, audit-logged dispatch boundary.
+<!-- FORKABLE_COUNTS_END -->
 
 ## When to reach for forkable
 
