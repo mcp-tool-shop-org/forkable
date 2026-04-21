@@ -7,11 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [2.1.0] - 2026-04-21
 
-### Changed
+Closes all five phases of [`design/brand-mode.md`](design/brand-mode.md) — the product-brand rename engine that's a superset of the v1.1.0 content rename engine.
+
+### Added
+- **`--brand` flag** for `forkctl rename plan`. Emits a categorized summary in the plan diff (identifiers / env-vars / tool-names / error-classes / headers / other) so users can see the shape of the rebrand at a glance.
+- **`--strings <mode>` gate** with four modes: `off`, `safe`, `review`, `all`. Default is `all` (v1.1.0 behavior) when `--brand` is off, `review` when `--brand` is on. `review` tags each string-literal rewrite with a `STRING_REWRITE_PENDING_REVIEW` warning so users can audit before `apply`.
+- **Polyglot language bundle** via 11 new `optionalDependencies` (`@ast-grep/lang-python`, `-rust`, `-go`, `-java`, `-ruby`, `-csharp`, `-cpp`, `-c`, `-bash`, `-yaml`, `-json`). Registered at module-load via `registerDynamicLanguage`. Failures fall through to the existing `RENAME_LANG_UNAVAILABLE` warning — no regression for users who skip optional deps.
+- **Brand-category classifier** (`src/lib/rename/categories.ts`) — pure function that tags each `RenameChange` with a semantic bucket. Six categories, stable zero-initialized counts, files-per-category aggregation.
+- **New schema fields** on `RenamePlanInput`: `brand: boolean`, `stringsMode: StringsMode`. On `RenamePlan`: optional `brand` block with per-category `{hits, files}`. Fingerprint now includes brand + stringsMode for correct staleness detection.
 
 ### Fixed
+- **Compound-identifier rename miss.** `ForkableError`, `ForkableErrorCode`, `makeForkableTool`, `FORKABLE_LOG`, `FORKABLE_STATE_DIR`, `MAKE_FORKABLE_BRANCH_EXISTS` — these all slipped past the v1.1.0 Layer 7 rename engine during the v2.0.0 self-rename dogfood. Root cause was two authoring errors: Pass B (ast-grep) used a whole-word-anchored regex and queried only `identifier` + `type_identifier` kinds; Pass C (ts-morph) used strict `from === name` equality. Now Pass B covers `property_identifier` + `shorthand_property_identifier` with unanchored matching, and Pass C falls back to case-aware word-boundary rewrites plus iteration over class methods, class properties, and enum members.
+- **Snake_case tool-name strings.** `"forkable_assess"` and friends were missed because JS `\b` treats `_` as a word char. The symbols-pass string-fragment rewriter now does a two-pass sweep: JS `\b` for prose, identifier-boundary sweep for snake / kebab / SCREAMING / mid-PascalCase compounds inside strings.
+
+### Tests
+- 378 → 430 passing (+52 new assertions, 0 regressions). 6 previously-`.todo()` polyglot tests now real.
 
 ## [2.0.0] - 2026-04-20
 
